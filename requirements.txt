@@ -1,0 +1,2 @@
+-e .
+prometheus_client>=0.22,<1

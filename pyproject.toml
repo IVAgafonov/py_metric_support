@@ -1,0 +1,40 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "py_metric_support"
+version = "0.1.0"
+description = "Prometheus metric support"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "Apache-2.0" }
+authors = [
+    { name = "Igor Agafonov", email = "igoradm90@gmail.com" }
+]
+dependencies = [
+    "prometheus_client>=0.22,<1",
+]
+keywords = ["python", "prometheus", "metrics"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: Apache-2 License",
+    "Operating System :: OS Independent"
+]
+
+[project.urls]
+Homepage = "https://github.com/IVAgafonov/py_metric_support"
+Issues = "https://github.com/IVAgafonov/py_metric_support/issues"
+
+[project.optional-dependencies]
+test = ["pytest>=8,<9"]
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
