@@ -12,6 +12,7 @@ from typing import Callable, Iterator, Sequence
 
 from prometheus_client import CollectorRegistry, Counter, Gauge, Histogram, Summary, generate_latest
 from prometheus_client.core import GaugeMetricFamily
+from prometheus_summary import Summary as QuantileSummary
 
 
 @dataclass(frozen=True)
@@ -29,6 +30,7 @@ class _MetricKey:
     metric_type: str
     requested_name: str
     label_names: tuple[str, ...]
+    config: tuple[object, ...] = ()
 
 
 class _MetricBackend:
@@ -46,6 +48,39 @@ def _sanitize_prefix(value: str) -> str:
 
 def _sorted_labels(labels: Sequence[tuple[str, str]]) -> list[tuple[str, str]]:
     return sorted(labels, key=lambda item: item[0])
+
+
+def _normalize_summary_quantiles(
+    quantiles: Sequence[float | tuple[float, float]] | None,
+) -> tuple[tuple[float, float], ...]:
+    if quantiles is None:
+        return ()
+
+    normalized: list[tuple[float, float]] = []
+    for quantile in quantiles:
+        if isinstance(quantile, tuple):
+            rank, precision = quantile
+        else:
+            rank = quantile
+            if rank >= 0.99:
+                precision = 0.001
+            elif rank >= 0.9:
+                precision = 0.01
+            else:
+                precision = 0.05
+        normalized.append((float(rank), float(precision)))
+
+    return tuple(normalized)
+
+
+def _build_quantile_summary(exported_name: str, label_names: Sequence[str], invariants: tuple[tuple[float, float], ...]):
+    return QuantileSummary(
+        exported_name,
+        f"Summary for {exported_name}",
+        labelnames=label_names,
+        registry=MetricSupport._get_shared_backend().registry,
+        invariants=invariants,
+    )
 
 
 class _GaugeCallbackCollector:
@@ -96,6 +131,7 @@ class MetricSupport:
             "counter",
             name,
             [label_name for label_name, _ in sorted_labels],
+            (),
             lambda exported_name, label_names: Counter(
                 exported_name,
                 f"Counter for {exported_name}",
@@ -110,15 +146,23 @@ class MetricSupport:
         cls,
         name: str,
         *labels: tuple[str, str],
-        quantiles: Sequence[float] | None = None,
+        quantiles: Sequence[float | tuple[float, float]] | None = None,
     ):
-        del quantiles
         sorted_labels = _sorted_labels(labels)
+        invariants = _normalize_summary_quantiles(quantiles)
         metric = cls._get_or_create_metric(
             "summary",
             name,
             [label_name for label_name, _ in sorted_labels],
-            lambda exported_name, label_names: Summary(
+            (
+                ("quantiles",)
+                + invariants
+                if invariants
+                else ()
+            ),
+            lambda exported_name, label_names: _build_quantile_summary(exported_name, label_names, invariants)
+            if invariants
+            else Summary(
                 exported_name,
                 f"Summary for {exported_name}",
                 labelnames=label_names,
@@ -132,7 +176,7 @@ class MetricSupport:
         if func is not None:
             start = time.perf_counter()
             result = func()
-            cls.summary(name, *labels).observe(time.perf_counter() - start)
+            cls.summary(name, *labels, quantiles=[0.1, 0.5, 0.9, 0.99]).observe(time.perf_counter() - start)
             return result
 
         @contextmanager
@@ -141,7 +185,7 @@ class MetricSupport:
             try:
                 yield
             finally:
-                cls.summary(name, *labels).observe(time.perf_counter() - start)
+                cls.summary(name, *labels, quantiles=[0.1, 0.5, 0.9, 0.99]).observe(time.perf_counter() - start)
 
         return _timer_context()
 
@@ -152,6 +196,7 @@ class MetricSupport:
             "gauge",
             name,
             [label_name for label_name, _ in sorted_labels],
+            (),
             lambda exported_name, label_names: Gauge(
                 exported_name,
                 f"Gauge for {exported_name}",
@@ -172,6 +217,7 @@ class MetricSupport:
             "gauge_callback",
             name,
             list(label_names),
+            (),
             lambda exported_name, metric_label_names: cls._register_collector(
                 _GaugeCallbackCollector(exported_name, metric_label_names, callback)
             ),
@@ -201,6 +247,7 @@ class MetricSupport:
             "histogram",
             name,
             [label_name for label_name, _ in sorted_labels],
+            (start, factor, count),
             lambda exported_name, label_names: Histogram(
                 exported_name,
                 f"Histogram for {exported_name}",
@@ -242,6 +289,8 @@ class MetricSupport:
                         result["summary"][f"{key}[sum]"] = sample.value
                     elif sample.name.endswith("_count"):
                         result["summary"][f"{key}[count]"] = sample.value
+                    else:
+                        result["summary"][key] = sample.value
             elif family.type == "histogram":
                 bucket_index = 0
                 for sample in family.samples:
@@ -324,27 +373,34 @@ class MetricSupport:
         metric_type: str,
         name: str,
         label_names: Sequence[str],
+        config: tuple[object, ...],
         factory: Callable[[str, Sequence[str]], object],
     ) -> object:
-        key = _MetricKey(metric_type, name, tuple(label_names))
+        key = _MetricKey(metric_type, name, tuple(label_names), config)
         backend = cls._get_shared_backend()
         with backend.lock:
             metric = backend.metrics_cache.get(key)
             if metric is not None:
                 return metric
 
-            exported_name = cls._resolve_exported_name(name, metric_type, tuple(label_names))
+            exported_name = cls._resolve_exported_name(name, metric_type, tuple(label_names), config)
             metric = factory(exported_name, label_names)
             backend.metrics_cache[key] = metric
             return metric
 
     @classmethod
-    def _resolve_exported_name(cls, requested_name: str, metric_type: str, label_names: tuple[str, ...]) -> str:
+    def _resolve_exported_name(
+        cls,
+        requested_name: str,
+        metric_type: str,
+        label_names: tuple[str, ...],
+        config: tuple[object, ...],
+    ) -> str:
         backend = cls._get_shared_backend()
         base_name = f"{backend.prefix}_{requested_name}"
         candidate = base_name
         suffix = 1
-        signature = (metric_type, label_names)
+        signature = (metric_type, label_names, config)
 
         while True:
             existing = backend.registered_names.get(candidate)

@@ -1,2 +1,3 @@
 -e .
 prometheus_client>=0.22,<1
+prometheus-summary>=0.1.6,<1

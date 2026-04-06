@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "py_metric_support"
-version = "0.2.0"
+version = "0.3.0"
 description = "Prometheus metric support"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -14,6 +14,7 @@ authors = [
 ]
 dependencies = [
     "prometheus_client>=0.22,<1",
+    "prometheus-summary>=0.1.6,<1",
 ]
 keywords = ["python", "prometheus", "metrics"]
 classifiers = [

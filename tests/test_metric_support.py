@@ -5,8 +5,6 @@ import unittest
 
 from py_metric_support import Measure, MetricSupport
 
-
-
 class MetricSupportTest(unittest.TestCase):
     def setUp(self) -> None:
         self.previous_project_name = os.environ.get("PROJECT_NAME")
@@ -62,6 +60,25 @@ class MetricSupportTest(unittest.TestCase):
         )
         self.assertIn(
             'unnamed_project_test_summary_sum{label1="value1",label2="value2"} 20.0',
+            rendered,
+        )
+
+    def test_summary_exports_requested_quantiles(self) -> None:
+        metric = MetricSupport.summary(
+            "test_summary_quantiles",
+            ("label1", "value1"),
+            quantiles=[0.5, (0.95, 0.01)],
+        )
+        for value in (1, 2, 3, 4, 5):
+            metric.observe(value)
+
+        rendered = MetricSupport.to_prometheus()
+        self.assertIn(
+            'unnamed_project_test_summary_quantiles{label1="value1",quantile="0.5"}',
+            rendered,
+        )
+        self.assertIn(
+            'unnamed_project_test_summary_quantiles{label1="value1",quantile="0.95"}',
             rendered,
         )
 
