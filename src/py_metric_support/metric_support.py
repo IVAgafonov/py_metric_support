@@ -125,7 +125,7 @@ class MetricSupport:
                 registry=cls._get_shared_backend().registry,
             ),
         )
-        return metric.labels(*[label_value for _, label_value in sorted_labels])
+        return metric.labels(*[label_value for _, label_value in sorted_labels]) if sorted_labels else metric
 
     @classmethod
     def timer(cls, name: str, *labels: tuple[str, str], func: Callable[[], object] | None = None):

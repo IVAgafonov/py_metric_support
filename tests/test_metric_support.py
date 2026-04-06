@@ -91,6 +91,7 @@ class MetricSupportTest(unittest.TestCase):
 
     def test_json_export_matches_expected_shape(self) -> None:
         MetricSupport.counter("test_counter_1").inc()
+        MetricSupport.summary("test_summary_1").observe(0.1)
 
         payload = json.loads(MetricSupport.to_json_string())
 
